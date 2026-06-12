@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lans Ltd — Invoice Generator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --ink: #1a1a1a; --ink-mid: #555; --ink-soft: #999;
+    --rule: #ddd; --surface: #fff; --surface-2: #f7f7f5; --surface-3: #f0efe9;
+    --accent: #1a4fa0; --accent-soft: #e8eef8;
+    --danger: #c0392b; --success: #1a7a4a; --warn-bg: #fffbe6; --warn-border: #e6c200;
+    --radius: 8px; --mono: 'Courier New', monospace;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--surface-3); color: var(--ink); min-height: 100vh; padding: 0 0 4rem; }
+  header { background: var(--surface); border-bottom: 1px solid var(--rule); padding: 1.25rem 1.5rem; display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+  header h1 { font-size: 1.05rem; font-weight: 600; letter-spacing: -0.01em; }
+  header span { font-size: 0.8rem; color: var(--ink-soft); }
+  .container { max-width: 720px; margin: 0 auto; padding: 1.5rem 1rem; }
+
+  /* API key banner */
+  .api-banner {
+    background: var(--warn-bg); border: 1px solid var(--warn-border);
+    border-radius: var(--radius); padding: 0.85rem 1rem; margin-bottom: 1.25rem;
+  }
+  .api-banner-top { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .api-banner-top strong { font-size: 0.82rem; }
+  .api-banner-top span { font-size: 0.75rem; color: var(--ink-mid); flex: 1; }
+  .api-banner-top button { font-size: 0.72rem; color: var(--accent); background: none; border: none; cursor: pointer; text-decoration: underline; white-space: nowrap; }
+  .api-key-row { display: flex; gap: 0.5rem; }
+  .api-key-row input {
+    flex: 1; border: 1px solid var(--rule); border-radius: 6px;
+    padding: 0.45rem 0.6rem; font-size: 0.82rem; font-family: var(--mono);
+    background: var(--surface); color: var(--ink);
+  }
+  .api-key-row input:focus { outline: none; border-color: var(--accent); }
+  .api-key-row button {
+    padding: 0.45rem 0.9rem; background: var(--accent); color: #fff;
+    border: none; border-radius: 6px; font-size: 0.82rem; cursor: pointer; white-space: nowrap;
+  }
+  .api-set-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+  .api-set-row .dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; }
+  .api-set-row span { color: var(--ink-mid); flex: 1; }
+  .api-set-row button { font-size: 0.75rem; color: var(--danger); background: none; border: none; cursor: pointer; text-decoration: underline; }
+  .api-note { font-size: 0.72rem; color: var(--ink-mid); margin-top: 0.4rem; line-height: 1.5; }
+
+  /* Drop zone */
+  .drop-zone {
+    border: 1.5px dashed var(--rule); border-radius: var(--radius);
+    background: var(--surface); padding: 2.2rem 1rem; text-align: center;
+    cursor: pointer; transition: border-color 0.15s, background 0.15s; position: relative;
+  }
+  .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop-zone.no-key { opacity: 0.5; pointer-events: none; }
+  .drop-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .drop-zone-icon { font-size: 1.8rem; margin-bottom: 0.4rem; }
+  .drop-zone p { font-size: 0.88rem; color: var(--ink-mid); }
+  .drop-zone p strong { color: var(--ink); }
+  .drop-zone small { font-size: 0.73rem; color: var(--ink-soft); display: block; margin-top: 0.2rem; }
+
+  .preview-thumb {
+    margin-top: 0.75rem; display: none; align-items: center; gap: 0.75rem;
+    background: var(--surface-2); border: 1px solid var(--rule);
+    border-radius: var(--radius); padding: 0.55rem 0.75rem;
+  }
+  .preview-thumb img { width: 44px; height: 44px; object-fit: cover; border-radius: 4px; }
+  .preview-thumb span { font-size: 0.8rem; color: var(--ink-mid); flex: 1; }
+  .preview-thumb button { font-size: 0.73rem; color: var(--danger); background: none; border: none; cursor: pointer; }
+
+  .parse-btn {
+    display: block; width: 100%; margin-top: 0.6rem; padding: 0.65rem;
+    background: var(--accent); color: #fff; border: none; border-radius: var(--radius);
+    font-size: 0.88rem; font-weight: 500; cursor: pointer; transition: opacity 0.15s;
+  }
+  .parse-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .status-bar {
+    display: none; align-items: center; gap: 0.5rem; padding: 0.55rem 0.75rem;
+    border-radius: var(--radius); font-size: 0.8rem; margin-top: 0.4rem;
+  }
+  .status-bar.loading { background: var(--accent-soft); color: var(--accent); display: flex; }
+  .status-bar.error { background: #fdecea; color: var(--danger); display: flex; }
+  .status-bar.success { background: #e6f5ed; color: var(--success); display: flex; }
+  .spinner { width: 13px; height: 13px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .divider { height: 1px; background: var(--rule); margin: 1.25rem 0; }
+  .section-label { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 0.65rem; }
+
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+  @media (max-width: 480px) { .form-grid { grid-template-columns: 1fr; } }
+  .field { display: flex; flex-direction: column; gap: 0.28rem; }
+  .field label { font-size: 0.73rem; color: var(--ink-mid); font-weight: 500; }
+  .field input, .field select {
+    border: 1px solid var(--rule); border-radius: 6px; padding: 0.48rem 0.6rem;
+    font-size: 0.875rem; font-family: inherit; background: var(--surface); color: var(--ink);
+    transition: border-color 0.15s; width: 100%;
+  }
+  .field input:focus { outline: none; border-color: var(--accent); }
+
+  /* Line items */
+  .line-items-header { display: grid; grid-template-columns: 88px 78px 88px 82px 28px; gap: 0.35rem; margin-bottom: 0.25rem; }
+  .line-items-header span { font-size: 0.66rem; color: var(--ink-soft); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+  @media (max-width: 480px) { .line-items-header { display: none; } }
+  .line-items { display: flex; flex-direction: column; gap: 0.4rem; }
+  .line-item { display: grid; grid-template-columns: 88px 78px 88px 82px 28px; gap: 0.35rem; align-items: center; }
+  @media (max-width: 480px) {
+    .line-item {
+      grid-template-columns: 1fr 1fr; background: var(--surface);
+      border: 1px solid var(--rule); border-radius: var(--radius);
+      padding: 0.55rem 2.2rem 0.55rem 0.6rem; gap: 0.28rem; position: relative;
+    }
+    .line-item .remove-btn { position: absolute; top: 0.35rem; right: 0.35rem; }
+  }
+  .line-item input {
+    border: 1px solid var(--rule); border-radius: 6px; padding: 0.42rem 0.48rem;
+    font-size: 0.82rem; font-family: var(--mono); background: var(--surface); color: var(--ink); width: 100%;
+  }
+  .line-item input:focus { outline: none; border-color: var(--accent); }
+  .line-item input.amount { text-align: right; }
+  .remove-btn {
+    width: 26px; height: 26px; border: 1px solid var(--rule); border-radius: 5px;
+    background: var(--surface); color: var(--ink-soft); cursor: pointer; font-size: 0.9rem;
+    display: flex; align-items: center; justify-content: center; transition: border-color 0.15s, color 0.15s; flex-shrink: 0;
+  }
+  .remove-btn:hover { border-color: var(--danger); color: var(--danger); }
+  .add-line-btn {
+    display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.38rem 0.7rem;
+    border: 1px dashed var(--rule); border-radius: 6px; background: none; color: var(--ink-mid);
+    font-size: 0.78rem; cursor: pointer; transition: border-color 0.15s, color 0.15s; margin-top: 0.2rem;
+  }
+  .add-line-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .admin-total-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; margin-top: 0.5rem; align-items: end; }
+  @media (max-width: 480px) { .admin-total-row { grid-template-columns: 1fr; } }
+  .totals-box { display: flex; justify-content: flex-end; }
+  .totals-inner {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius);
+    padding: 0.65rem 1rem; width: 100%; display: flex; justify-content: space-between; align-items: center;
+  }
+  .totals-inner span:first-child { font-size: 0.78rem; color: var(--ink-mid); }
+  .totals-inner span:last-child { font-size: 1rem; font-weight: 600; font-family: var(--mono); }
+
+  .actions { display: flex; gap: 0.65rem; margin-top: 1.25rem; }
+  .btn-primary {
+    flex: 1; padding: 0.7rem; background: var(--accent); color: #fff; border: none;
+    border-radius: var(--radius); font-size: 0.88rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s;
+  }
+  .btn-primary:hover { opacity: 0.88; }
+  .btn-secondary {
+    padding: 0.7rem 1rem; background: var(--surface); color: var(--ink);
+    border: 1px solid var(--rule); border-radius: var(--radius); font-size: 0.85rem;
+    font-weight: 500; cursor: pointer; transition: border-color 0.15s;
+  }
+  .btn-secondary:hover { border-color: var(--accent); }
+
+  /* Preview */
+  .invoice-preview { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); padding: 1.5rem; font-size: 0.78rem; line-height: 1.5; margin-top: 1.25rem; display: none; }
+  .invoice-preview.visible { display: block; }
+  .inv-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.85rem; }
+  .inv-company { font-weight: 700; font-size: 0.92rem; }
+  .inv-addr { color: var(--ink-mid); font-size: 0.71rem; margin-top: 0.15rem; }
+  .inv-ids { font-size: 0.68rem; color: var(--ink-soft); margin-top: 0.1rem; }
+  .inv-meta { text-align: right; }
+  .inv-meta .inv-num { font-size: 0.82rem; font-weight: 700; }
+  .inv-meta .inv-date { font-size: 0.71rem; color: var(--ink-mid); }
+  .inv-bill-header { background: #e8e8e6; padding: 0.28rem 0.5rem; font-weight: 700; font-size: 0.7rem; }
+  .inv-bill-body { border: 1px solid #ccc; border-top: none; padding: 0.45rem 0.5rem; margin-bottom: 0.65rem; font-size: 0.71rem; }
+  .inv-table { width: 100%; border-collapse: collapse; }
+  .inv-table td { padding: 0.28rem 0.4rem; border: 0.5px solid #ccc; font-size: 0.71rem; }
+  .inv-table td:last-child { text-align: right; font-weight: 600; }
+  .inv-table tr.total-row td { border: 2px solid #333; font-weight: 700; background: #f0efe9; }
+  .inv-footer { margin-top: 0.85rem; text-align: center; font-size: 0.66rem; color: var(--ink-mid); border-top: 1px solid var(--rule); padding-top: 0.65rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pallet Company Lans Ltd</h1>
+  <span>Invoice Generator</span>
+</header>
+
+<div class="container">
+
+  <!-- API Key Banner -->
+  <div class="api-banner" id="apiBanner">
+    <div class="api-banner-top">
+      <strong>🔑 Anthropic API key required for photo reading</strong>
+      <span>Stored locally in your browser only</span>
+      <button onclick="showKeyHelp()">Where do I get one?</button>
+    </div>
+    <div id="apiKeyEntry">
+      <div class="api-key-row">
+        <input type="password" id="apiKeyInput" placeholder="sk-ant-api03-..." autocomplete="off" spellcheck="false">
+        <button onclick="saveApiKey()">Save key</button>
+      </div>
+      <p class="api-note">Your key is saved only in this browser's local storage and never sent anywhere except directly to Anthropic's API when you read a photo.</p>
+    </div>
+    <div id="apiKeySet" style="display:none;">
+      <div class="api-set-row">
+        <div class="dot"></div>
+        <span>API key saved — photo reading enabled</span>
+        <button onclick="clearApiKey()">Remove key</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drop zone -->
+  <div class="section-label">Import from photo (optional)</div>
+  <div class="drop-zone" id="dropZone">
+    <input type="file" accept="image/*" id="fileInput">
+    <div class="drop-zone-icon">📷</div>
+    <p><strong>Drop an invoice photo here</strong></p>
+    <p>or tap to choose from library / camera</p>
+    <small>AI reads the handwriting and fills the form automatically</small>
+  </div>
+
+  <div class="preview-thumb" id="previewThumb">
+    <img id="previewImg" src="" alt="">
+    <span id="previewName"></span>
+    <button onclick="clearImage()">✕ Remove</button>
+  </div>
+
+  <button class="parse-btn" id="parseBtn" disabled onclick="parseImage()">Read invoice from photo →</button>
+  <div class="status-bar" id="statusBar"><div class="spinner" id="spinner"></div><span id="statusMsg"></span></div>
+
+  <div class="divider"></div>
+
+  <!-- Invoice form -->
+  <div class="section-label">Invoice details</div>
+  <div class="form-grid">
+    <div class="field"><label>Invoice number</label><input type="text" id="invoiceNum" placeholder="224"></div>
+    <div class="field"><label>Invoice date</label><input type="date" id="invoiceDate"></div>
+  </div>
+
+  <div class="divider"></div>
+  <div class="section-label">Export line items</div>
+  <div class="line-items-header">
+    <span>Date</span><span>Export #</span><span>Reference</span><span>Amount £</span><span></span>
+  </div>
+  <div class="line-items" id="lineItems"></div>
+  <button class="add-line-btn" onclick="addLine()">+ Add line</button>
+
+  <div class="divider"></div>
+  <div class="admin-total-row">
+    <div class="field">
+      <label>Admin / Services £</label>
+      <input type="number" id="adminAmount" value="0" min="0" placeholder="0" oninput="updateTotal()">
+    </div>
+    <div class="totals-box">
+      <div class="totals-inner"><span>Total</span><span id="totalDisplay">£0</span></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-secondary" onclick="previewInvoice()">Preview</button>
+    <button class="btn-primary" onclick="generatePDF()">⬇ Download PDF</button>
+  </div>
+
+  <div class="invoice-preview" id="invoicePreview"></div>
+</div>
+
+<script>
+const { jsPDF } = window.jspdf;
+
+let imageBase64 = null;
+let imageType = null;
+
+// Init
+document.getElementById('invoiceDate').valueAsDate = new Date();
+for (let i = 0; i < 4; i++) addLine();
+loadApiKeyState();
+
+// ── API Key ──────────────────────────────────────────────
+function loadApiKeyState() {
+  const key = localStorage.getItem('lans_api_key');
+  if (key) {
+    document.getElementById('apiKeyEntry').style.display = 'none';
+    document.getElementById('apiKeySet').style.display = 'block';
+    updateDropZoneState(true);
+  } else {
+    updateDropZoneState(false);
+  }
+}
+
+function saveApiKey() {
+  const val = document.getElementById('apiKeyInput').value.trim();
+  if (!val.startsWith('sk-ant-')) {
+    alert('That doesn\'t look like a valid Anthropic API key. It should start with sk-ant-');
+    return;
+  }
+  localStorage.setItem('lans_api_key', val);
+  document.getElementById('apiKeyInput').value = '';
+  loadApiKeyState();
+}
+
+function clearApiKey() {
+  if (confirm('Remove saved API key?')) {
+    localStorage.removeItem('lans_api_key');
+    loadApiKeyState();
+  }
+}
+
+function updateDropZoneState(hasKey) {
+  const dz = document.getElementById('dropZone');
+  if (hasKey) {
+    dz.classList.remove('no-key');
+    dz.querySelector('small').textContent = 'AI reads the handwriting and fills the form automatically';
+  } else {
+    dz.classList.add('no-key');
+    dz.querySelector('small').textContent = 'Add your API key above to enable photo reading';
+  }
+}
+
+function showKeyHelp() {
+  window.open('https://console.anthropic.com/keys', '_blank');
+}
+
+// Allow Enter key in API key input
+document.getElementById('apiKeyInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') saveApiKey();
+});
+
+// ── File handling ────────────────────────────────────────
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) loadFile(file);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const result = ev.target.result;
+    imageBase64 = result.split(',')[1];
+    imageType = file.type;
+    document.getElementById('previewImg').src = result;
+    document.getElementById('previewName').textContent = file.name;
+    document.getElementById('previewThumb').style.display = 'flex';
+    document.getElementById('parseBtn').disabled = !localStorage.getItem('lans_api_key');
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearImage() {
+  imageBase64 = null; imageType = null;
+  document.getElementById('previewThumb').style.display = 'none';
+  document.getElementById('parseBtn').disabled = true;
+  fileInput.value = '';
+  setStatus('', '');
+}
+
+function setStatus(type, msg) {
+  const bar = document.getElementById('statusBar');
+  bar.className = 'status-bar';
+  if (!type) { bar.style.display = 'none'; return; }
+  bar.classList.add(type);
+  document.getElementById('statusMsg').textContent = msg;
+  document.getElementById('spinner').style.display = type === 'loading' ? 'block' : 'none';
+}
+
+// ── AI Parsing ───────────────────────────────────────────
+async function parseImage() {
+  if (!imageBase64) return;
+  const apiKey = localStorage.getItem('lans_api_key');
+  if (!apiKey) { setStatus('error', 'No API key saved — add your key above first.'); return; }
+
+  setStatus('loading', 'Reading invoice photo with AI…');
+  document.getElementById('parseBtn').disabled = true;
+
+  const prompt = `You are reading a handwritten invoice photo. Extract all data and return ONLY valid JSON with no markdown fences, no explanation.
+
+Return exactly this structure:
+{
+  "invoiceNum": "222",
+  "invoiceDate": "2026-06-11",
+  "lines": [
+    {"date": "12.02", "export": "1299", "ref": "40704", "amount": 3000}
+  ],
+  "adminServices": 0
+}
+
+Rules:
+- invoiceDate must be YYYY-MM-DD
+- amount and adminServices must be numbers
+- If adminServices not shown, set 0
+- date = day.month format on each line (e.g. 12.02)
+- export = first shorter number on the line (e.g. 1299)
+- ref = longer reference number (e.g. 40704)
+- Extract every export line visible`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1000,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: imageType, data: imageBase64 } },
+            { type: 'text', text: prompt }
+          ]
+        }]
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      if (response.status === 401) throw new Error('Invalid API key — check your key and try again.');
+      throw new Error(err.error?.message || `API error ${response.status}`);
+    }
+
+    const data = await response.json();
+    const text = data.content.map(b => b.text || '').join('');
+    const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+
+    document.getElementById('invoiceNum').value = parsed.invoiceNum || '';
+    document.getElementById('invoiceDate').value = parsed.invoiceDate || '';
+    document.getElementById('adminAmount').value = parsed.adminServices ?? 0;
+    document.getElementById('lineItems').innerHTML = '';
+    (parsed.lines || []).forEach(l => addLine(l));
+    if (!parsed.lines?.length) addLine();
+    updateTotal();
+    setStatus('success', `Invoice #${parsed.invoiceNum} — ${(parsed.lines||[]).length} line(s) imported. Review and download.`);
+
+  } catch (err) {
+    setStatus('error', err.message);
+  }
+  document.getElementById('parseBtn').disabled = false;
+}
+
+// ── Form helpers ─────────────────────────────────────────
+function addLine(data = {}) {
+  const container = document.getElementById('lineItems');
+  const row = document.createElement('div');
+  row.className = 'line-item';
+  row.innerHTML = `
+    <input type="text" placeholder="12.02" value="${data.date||''}" oninput="updateTotal()">
+    <input type="text" placeholder="1299" value="${data.export||''}">
+    <input type="text" placeholder="40704" value="${data.ref||''}">
+    <input type="number" class="amount" placeholder="0" value="${data.amount||''}" oninput="updateTotal()">
+    <button class="remove-btn" onclick="this.closest('.line-item').remove();updateTotal()" title="Remove">✕</button>
+  `;
+  container.appendChild(row);
+  updateTotal();
+}
+
+function updateTotal() {
+  let sum = 0;
+  document.querySelectorAll('#lineItems .line-item').forEach(row => {
+    sum += parseFloat(row.querySelectorAll('input')[3].value) || 0;
+  });
+  sum += parseFloat(document.getElementById('adminAmount').value) || 0;
+  document.getElementById('totalDisplay').textContent = '£' + sum.toLocaleString('en-GB');
+}
+
+function getFormData() {
+  const lines = [];
+  document.querySelectorAll('#lineItems .line-item').forEach(row => {
+    const inp = row.querySelectorAll('input');
+    lines.push({ date: inp[0].value.trim(), export: inp[1].value.trim(), ref: inp[2].value.trim(), amount: parseFloat(inp[3].value)||0 });
+  });
+  const admin = parseFloat(document.getElementById('adminAmount').value)||0;
+  return {
+    invoiceNum: document.getElementById('invoiceNum').value||'—',
+    invoiceDate: document.getElementById('invoiceDate').value,
+    lines, admin,
+    total: lines.reduce((s,l)=>s+l.amount,0) + admin
+  };
+}
+
+function formatDate(iso) {
+  if (!iso) return '';
+  const [y,m,d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+// ── Preview ───────────────────────────────────────────────
+function previewInvoice() {
+  const d = getFormData();
+  const lineRows = d.lines.map(l => `<tr><td>${l.date}: Export ${l.export}-${l.ref}</td><td>£${l.amount.toLocaleString('en-GB')}</td></tr>`).join('');
+  const el = document.getElementById('invoicePreview');
+  el.innerHTML = `
+    <div class="inv-header">
+      <div>
+        <div class="inv-company">Pallet Company Lans Ltd</div>
+        <div class="inv-addr">4 Saunders Court, Great Cambourne, Cambridge CB23 5AR</div>
+        <div class="inv-ids">VAT: 260477795 &nbsp;·&nbsp; EORI: GB260477795000</div>
+        <div class="inv-ids">Email: ceeslans@live.co.uk &nbsp;·&nbsp; Phone: +447836358027</div>
+      </div>
+      <div class="inv-meta">
+        <div class="inv-num">INVOICE #${d.invoiceNum}</div>
+        <div class="inv-date">${formatDate(d.invoiceDate)}</div>
+      </div>
+    </div>
+    <div class="inv-bill-header">BILL TO</div>
+    <div class="inv-bill-body">
+      <strong>PALLETBEDRIJF LANS BV</strong>, VLIETWEG 8A, KLUNDERT, HOLLAND 4791 EZ<br>
+      VAT: NL818477647B01 &nbsp;·&nbsp; EORI: NL818477647
+    </div>
+    <table class="inv-table">
+      ${lineRows}
+      <tr><td>Admin / Services</td><td>£${d.admin.toLocaleString('en-GB')}</td></tr>
+      <tr class="total-row"><td><strong>TOTAL</strong></td><td><strong>£${d.total.toLocaleString('en-GB')}</strong></td></tr>
+    </table>
+    <div class="inv-footer">
+      <strong>Payment Terms:</strong> Settlement within 7 days &nbsp;·&nbsp;
+      Bank transfer to: <strong>Cashplus</strong> &nbsp; Sort: <strong>08-71-99</strong> &nbsp; Account: <strong>02570362</strong>
+    </div>`;
+  el.classList.add('visible');
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ── PDF Generation ────────────────────────────────────────
+function generatePDF() {
+  const d = getFormData();
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const W = 210, margin = 18, cW = W - margin * 2;
+  let y = 20;
+
+  function txt(str, x, yy, opts={}) {
+    doc.setFontSize(opts.size||9);
+    doc.setTextColor(...(opts.color||[26,26,26]));
+    doc.setFont('helvetica', opts.bold ? 'bold' : 'normal');
+    doc.text(String(str), x, yy, { align: opts.align||'left', maxWidth: opts.maxWidth });
+  }
+  function rule(yy, w=0.2, c=[210,210,208]) {
+    doc.setDrawColor(...c); doc.setLineWidth(w); doc.line(margin,yy,W-margin,yy);
+  }
+  function box(x,yy,w,h,fillRGB,strokeRGB,sw=0.3) {
+    if (fillRGB) { doc.setFillColor(...fillRGB); doc.rect(x,yy,w,h,'F'); }
+    if (strokeRGB) { doc.setDrawColor(...strokeRGB); doc.setLineWidth(sw); doc.rect(x,yy,w,h); }
+  }
+
+  // Header
+  txt('Pallet Company Lans Ltd', margin, y, {size:15, bold:true});
+  y += 6;
+  txt('4 Saunders Court, Great Cambourne, Cambridge CB23 5AR', margin, y, {size:8, color:[100,100,100]});
+  y += 4.5;
+  txt('VAT: 260477795   EORI: GB260477795000   Email: ceeslans@live.co.uk   Phone: +447836358027', margin, y, {size:7.5, color:[140,140,140]});
+  y += 7;
+  rule(y, 0.5, [180,180,175]);
+  y += 7;
+
+  // Invoice # + Date
+  txt('INVOICE', margin, y, {size:7.5, color:[160,160,155]});
+  txt(`#${d.invoiceNum}`, margin+14, y, {size:13, bold:true});
+  txt('DATE', W-margin, y-5, {size:7.5, color:[160,160,155], align:'right'});
+  txt(formatDate(d.invoiceDate), W-margin, y, {size:11, bold:true, align:'right'});
+  y += 10;
+  rule(y);
+  y += 7;
+
+  // Bill To
+  box(margin, y, cW, 6.5, [232,232,228], [200,200,196]);
+  txt('BILL TO', margin+3, y+4.5, {size:8, bold:true});
+  y += 6.5;
+  box(margin, y, cW, 16, null, [200,200,196]);
+  txt('PALLETBEDRIJF LANS BV, VLIETWEG 8A, KLUNDERT, HOLLAND 4791 EZ', margin+3, y+5.5, {size:8.5, bold:true});
+  txt('VAT: NL818477647B01   EORI: NL818477647', margin+3, y+10.5, {size:7.5, color:[100,100,100]});
+  y += 23;
+
+  // Table header
+  box(margin, y, cW, 6.5, [245,245,242], [200,200,196]);
+  txt('Description', margin+3, y+4.5, {size:8, bold:true});
+  txt('Amount', W-margin-3, y+4.5, {size:8, bold:true, align:'right'});
+  y += 6.5;
+
+  // Lines
+  d.lines.forEach(l => {
+    box(margin, y, cW, 7, null, [210,210,208], 0.2);
+    txt(`${l.date}: Export ${l.export}-${l.ref}`, margin+3, y+4.8, {size:8.5});
+    txt(`£${l.amount.toLocaleString('en-GB')}`, W-margin-3, y+4.8, {size:8.5, bold:true, align:'right'});
+    y += 7;
+  });
+
+  // Admin
+  box(margin, y, cW, 7, null, [210,210,208], 0.2);
+  txt('Admin / Services', margin+3, y+4.8, {size:8.5});
+  txt(`£${d.admin.toLocaleString('en-GB')}`, W-margin-3, y+4.8, {size:8.5, bold:true, align:'right'});
+  y += 7;
+
+  // Total
+  box(margin, y, cW, 10, [240,239,233], [40,40,40], 0.7);
+  txt('TOTAL', margin+3, y+6.8, {size:9.5, bold:true});
+  txt(`£${d.total.toLocaleString('en-GB')}`, W-margin-3, y+6.8, {size:12, bold:true, align:'right'});
+  y += 18;
+
+  // Payment terms
+  rule(y, 0.4, [190,190,186]);
+  y += 6;
+  txt('Payment Terms', W/2, y, {size:8.5, bold:true, align:'center'});
+  y += 4.5;
+  txt('Settlement should be completed within 7 days of invoice date.', W/2, y, {size:8, color:[110,110,110], align:'center'});
+  y += 4;
+  txt('Payment by Bank Transfer should be made Payable to:', W/2, y, {size:8, color:[110,110,110], align:'center'});
+  y += 5;
+  txt('Bank: Cashplus   Sort Code: 08-71-99   Account No: 02570362', W/2, y, {size:9, bold:true, align:'center'});
+
+  doc.save(`Invoice_${d.invoiceNum}_${(d.invoiceDate||'').replace(/-/g,'')}.pdf`);
+}
+</script>
+</body>
+</html>
